@@ -3,12 +3,23 @@
 use ogl33::*;
 use std::fs;
 use image::io::Reader as ImageReader;
-use ultraviolet::mat;
+use ultraviolet::{mat, vec};
+use tobj::Model;
 
 // function to wrap clear color and allow it to be labelled safe because nothing should be able to go wrong with glclearcolor
 pub fn clear_color(r:f32, g:f32, b:f32, a:f32) {
     unsafe { glClearColor(r,g,b,a) }
 }
+// verts + norms, tri indices, # of tris, shaderidx
+pub struct MeshData(pub Vec<f32>, pub Vec<u32>, pub usize, pub usize);
+// vao, vbo, ebo, tris, shaderidx
+pub struct Drawable(pub VertexArray, pub Buffer, pub Buffer, pub usize, pub usize);
+// impl Drawable {
+//     pub fn new() -> Self {
+
+//     }
+// }
+pub struct DrawableObject(pub vec::Vec3, pub usize, pub usize);
 
 // struct to wrap creation of Vertex Array Objects with functions to bind it as the active VAO or unbind it
 pub struct VertexArray(pub GLuint);
@@ -86,19 +97,39 @@ pub enum ShaderType {
     Fragment = GL_FRAGMENT_SHADER as isize,
 }
 
-pub const UNI_ID: [&str; 5] = [
-    "transform",
-    "model",
-    "view",
-    "projection",
-    "our_texture\0"
+pub const UNI_ID: [&str; 15] = [
+    "translation\0",
+    "rotation\0",
+    "model\0",
+    "view\0",
+    "projection\0",
+    "lightPos\0",
+    "viewPos\0",
+    "our_color\0",
+    "ambient_color\0",
+    "diffuse_color\0",
+    "specular_color\0",
+    "optical_density\0",
+    "dissolve\0",
+    "our_texture\0",
+    "our_texture2\0"
 ];
 pub enum UniEnum {
-    Transform = 0,
-    Model = 1,
-    View = 2, 
-    Projection = 3,
-    Texture = 4
+    Translation,
+    Rotation,
+    Model,
+    View, 
+    Projection,
+    LightPos,
+    ViewPos,
+    Color,
+    AmbientColor,
+    DiffuseColor,
+    SpecularColor,
+    OpticalDensity,
+    Dissolve,
+    Texture,
+    Texture2
 }
 
 // struct to wrap creation of shader with functions to operate
@@ -421,11 +452,75 @@ impl Texture {
     }
 }
 
+pub fn color_program<'a>(
+    base_folder: &'a str,
+    shader_folder: &'a str,
+    color: &vec::Vec3,
+    translation: &mat::Mat4, 
+    rotation: &mat::Mat4, 
+    model: &mat::Mat4, 
+    view: &mat::Mat4, 
+    projection: &mat::Mat4
+) -> ShaderProgram {
+    let vert = format!("{}/{}/{}", base_folder, shader_folder, "vertex");
+    let frag = format!("{}/{}/{}", base_folder, shader_folder, "fragment");
+    let shader = ShaderProgram::from_files(&vert, &frag).unwrap();
+    let [v1, v2, v3] = *((*color).as_array());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Translation as usize], translation.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Rotation as usize], rotation.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Model as usize], model.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::View as usize], view.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Projection as usize], projection.as_ptr().cast());
+    shader.set_3_float(UNI_ID[UniEnum::Color as usize], v1, v2, v3);
+    shader.set_3_float(UNI_ID[UniEnum::LightPos as usize], 0.0, 0.0, 0.0);
+    shader.set_3_float(UNI_ID[UniEnum::ViewPos as usize], 0.0, 0.0, 0.0);
+    shader
+}
+
+pub fn param_color_program<'a>(
+    base_folder: &'a str,
+    shader_folder: &'a str,
+    optical_density: f32,
+    ambient_color: &vec::Vec3,
+    diffuse_color: &vec::Vec3,
+    specular_color: &vec::Vec3,
+    dissolve: f32,
+    translation: &mat::Mat4, 
+    rotation: &mat::Mat4, 
+    model: &mat::Mat4, 
+    view: &mat::Mat4, 
+    projection: &mat::Mat4
+) -> ShaderProgram {
+    let vert = format!("{}/{}/{}", base_folder, shader_folder, "vertex");
+    let frag = format!("{}/{}/{}", base_folder, shader_folder, "fragment");
+    let shader = ShaderProgram::from_files(&vert, &frag).unwrap();
+    let [v1, v2, v3] = *((*ambient_color).as_array());
+    let [v4, v5, v6] = *((*diffuse_color).as_array());
+    let [v7, v8, v9] = *((*specular_color).as_array());
+    println!("ambient {:?}", (v1, v2, v3));
+    println!("diffuse {:?}", (v4, v5, v6));
+    println!("specular {:?}", (v7, v8, v9));
+    shader.set_3_float(UNI_ID[UniEnum::AmbientColor as usize], v1, v2, v3);
+    shader.set_3_float(UNI_ID[UniEnum::DiffuseColor as usize], v4, v5, v6);
+    shader.set_3_float(UNI_ID[UniEnum::SpecularColor as usize], v7, v8, v9);
+    shader.set_1_float(UNI_ID[UniEnum::OpticalDensity as usize], optical_density);
+    shader.set_1_float(UNI_ID[UniEnum::Dissolve as usize], dissolve);
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Translation as usize], translation.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Rotation as usize], rotation.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Model as usize], model.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::View as usize], view.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Projection as usize], projection.as_ptr().cast());
+    shader.set_3_float(UNI_ID[UniEnum::LightPos as usize], 0.0, 0.0, 0.0);
+    shader.set_3_float(UNI_ID[UniEnum::ViewPos as usize], 0.0, 0.0, 0.0);
+    shader
+}
+
 pub fn texture_program<'a>(
     base_folder: &'a str, 
     shader_folder: &'a str,
     texture: &'a Texture,
-    transform: &mat::Mat4, 
+    translation: &mat::Mat4, 
+    rotation: &mat::Mat4, 
     model: &mat::Mat4, 
     view: &mat::Mat4, 
     projection: &mat::Mat4
@@ -438,11 +533,44 @@ pub fn texture_program<'a>(
         &texture,
         UNI_ID[UniEnum::Texture as usize]
     ).unwrap();
-    shader.set_4_float_matrix(UNI_ID[UniEnum::Transform as usize], transform.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Translation as usize], translation.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Rotation as usize], rotation.as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::Model as usize], model.as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::View as usize], view.as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::Projection as usize], projection.as_ptr().cast());
     shader
+}
+
+pub type Vertex = [f32; 3];
+pub type TexelVertex = [f32; 3 + 2];
+pub type NormalVertex = [f32; 3 + 3];
+
+pub struct Mesh(pub Vec<TexelVertex>);
+impl Mesh {
+    pub fn new() -> Mesh {
+        Self(Vec::new())
+    }
+
+    pub fn add_tri(&mut self, tris: &mut Vec<TexelVertex>) {
+        self.0.append(tris);
+    }
+}
+
+pub fn combine_loaded_data<'a> (
+    loaded_data: &'a Model,
+) -> Vec<f32> {
+    let mut output_vec = Vec::new();
+    let num = (*loaded_data).mesh.positions.len();
+    for i in 0..num {
+        output_vec.push((*loaded_data).mesh.positions[i]);
+        if i % 3 == 2 {
+            for j in (i-2)..=(i) {
+                output_vec.push((*loaded_data).mesh.normals[j]);
+            }
+        }
+    }
+
+    output_vec
 }
 
 /// The polygon display modes you can set.

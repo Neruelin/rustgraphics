@@ -5,8 +5,8 @@
 
 #version 330 core
 out vec4 final_color;
-uniform vec4 our_color;
+uniform vec3 our_color;
 
 void main() {
-    final_color = our_color;
+    final_color = vec4(our_color, 0.0);
 }
