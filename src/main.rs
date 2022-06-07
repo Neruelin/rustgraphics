@@ -62,13 +62,13 @@ fn main() {
         glEnable(GL_DEPTH_TEST);
     }
 
-    let view_position = vec::Vec3::new(0.0,0.0, 0.0);
+    let mut view_position = vec::Vec3::new(0.0,0.0, 0.0);
     let light_position = vec::Vec3::new(0.0, 10.0, 0.0);
     
     let mut world_translation = mat::Mat4::identity();
     let mut world_rotation = mat::Mat4::identity();
     let model = mat::Mat4::identity();
-    let view = mat::Mat4::from_translation(view_position);
+    let mut view = mat::Mat4::from_translation(view_position);
     let projection = projection::perspective_gl(45.0_f32, (WINDOW_WIDTH as f32) / (WINDOW_HEIGHT as f32), 0.1, 100.0);
 
 
@@ -209,6 +209,7 @@ fn main() {
     let target_frame_time = Duration::from_micros(target_frame_micros);
     let _start_instant = Instant::now();
     let mut update_view_lights_worldtrans = true;
+    let mut focus_idx = 0;
 
     clear_color(0.0, 0.0, 0.0, 1.0);
 
@@ -249,31 +250,39 @@ fn main() {
 
         let mut direction = vec::Vec3::zero();
 
-        if keys_held.contains(&Keycode::W) { direction.y += 1.0; } 
-        if keys_held.contains(&Keycode::S) { direction.y += -1.0; } 
-        if keys_held.contains(&Keycode::D) { direction.x += 1.0; } 
-        if keys_held.contains(&Keycode::A) { direction.x += -1.0; }
-        if keys_held.contains(&Keycode::INSERT) { direction.z += -1.0; }
-        if keys_held.contains(&Keycode::DELETE) { direction.z += 1.0; }
+        if keys_held.contains(&Keycode::W) { direction.y += 1.0; update_view_lights_worldtrans = true;} 
+        if keys_held.contains(&Keycode::S) { direction.y += -1.0; update_view_lights_worldtrans = true;} 
+        if keys_held.contains(&Keycode::D) { direction.x += 1.0; update_view_lights_worldtrans = true;} 
+        if keys_held.contains(&Keycode::A) { direction.x += -1.0; update_view_lights_worldtrans = true;}
+        if keys_held.contains(&Keycode::INSERT) { direction.z += -1.0; update_view_lights_worldtrans = true;}
+        if keys_held.contains(&Keycode::DELETE) { direction.z += 1.0; update_view_lights_worldtrans = true;}
 
         if direction != vec::Vec3::zero() { 
             direction.normalize(); 
         }
 
-        direction *= 0.5 * deltasecs;
+        direction *= 2.0 * deltasecs;
 
         input_translation.translate(&direction);
+
+        if keys_held.contains(&Keycode::_1) { focus_idx = 0; update_view_lights_worldtrans = true;} 
+        if keys_held.contains(&Keycode::_2) { focus_idx = 1; update_view_lights_worldtrans = true;} 
+        if keys_held.contains(&Keycode::_3) { focus_idx = 2; update_view_lights_worldtrans = true;} 
+        if keys_held.contains(&Keycode::_4) { focus_idx = 3; update_view_lights_worldtrans = true;} 
+
+        view_position += direction;
+        view = mat::Mat4::look_at(view_position, objs_to_draw[focus_idx].0, vec::Vec3::new(0.0,1.0,0.0));
 
         /* draw vao verts */
 
         if update_view_lights_worldtrans {
-            println!("update view lights and world translation");
             let [v1, v2, v3] = *(view_position.as_array());
             let [v4, v5, v6] = *(light_position.as_array());
             for shader in &shaders {
                 (*shader).set_4_float_matrix(UNI_ID[UniEnum::Translation as usize], world_translation.as_ptr().cast());
                 (*shader).set_3_float(UNI_ID[UniEnum::ViewPos as usize], v1, v2, v3);
                 (*shader).set_3_float(UNI_ID[UniEnum::LightPos as usize], v4, v5, v6);
+                (*shader).set_4_float_matrix(UNI_ID[UniEnum::View as usize], view.as_ptr().cast());
             }
             update_view_lights_worldtrans = false;
         }
@@ -282,7 +291,7 @@ fn main() {
             let (model_translation, model_type, shader_index) = ((*obj).0, (*obj).1, (*obj).2);
             let shader = &shaders[shader_index];
             let mut temp_model = mat::Mat4::identity();
-            temp_model = mat::Mat4::from_translation(model_translation) * input_translation * model_rotation * temp_model;
+            temp_model = mat::Mat4::from_translation(model_translation) * model_rotation * temp_model;
 
             (*shader).use_program();
             (*shader).set_4_float_matrix(UNI_ID[UniEnum::Model as usize], temp_model.as_ptr().cast());
