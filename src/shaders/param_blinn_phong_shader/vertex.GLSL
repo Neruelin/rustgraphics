@@ -11,12 +11,11 @@ out VS_OUT {
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
-uniform mat4 translation;
 uniform mat4 rotation;
 
 void main()
 {
     vs_out.FragPos = aPos;
     vs_out.Normal = (rotation * vec4(aNormal, 1.0)).xyz;
-    gl_Position = projection * view * model * translation * vec4(aPos, 1.0);
+    gl_Position = projection * view * model * vec4(aPos, 1.0);
 }

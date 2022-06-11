@@ -16,6 +16,8 @@ use tobj;
 
 mod gllib;
 use crate::gllib::*;
+mod camera;
+use crate::camera::*;
 
 /// Takes a string literal and concatenates a null byte onto the end.
 #[macro_export]
@@ -45,9 +47,12 @@ pub fn init_sdl() -> SDL {
 
 const WINDOW_WIDTH: u32 = 800;
 const WINDOW_HEIGHT: u32 = 600;
+const SHADER_FOLDER_PATH: &str = "src/shaders";
+const BLINN_PHONG_SHADER_FOLDER: &str = "blinn_phong_shader";
+const PARAM_BLINN_PHONG_SHADER_FOLDER: &str = "param_blinn_phong_shader";
 
 fn main() {
-    let mut _rng = rand::thread_rng();
+    let mut rng = rand::thread_rng();
 
     let sdl = init_sdl();
 
@@ -62,37 +67,25 @@ fn main() {
         glEnable(GL_DEPTH_TEST);
     }
 
-    let mut view_position = vec::Vec3::new(0.0,0.0, 0.0);
-    let light_position = vec::Vec3::new(0.0, 10.0, 0.0);
-    
-    let mut world_translation = mat::Mat4::identity();
-    let mut world_rotation = mat::Mat4::identity();
-    let model = mat::Mat4::identity();
-    let mut view = mat::Mat4::from_translation(view_position);
-    let projection = projection::perspective_gl(45.0_f32, (WINDOW_WIDTH as f32) / (WINDOW_HEIGHT as f32), 0.1, 100.0);
+    let light_position = vec::Vec3::new(0.0, 10.0, -10.0);
+    let default_model = mat::Mat4::identity();
+        
+    let mut camera = CameraParams::new(
+        vec::Vec3::zero(),
+        vec::Vec3::new(0.0, 0.0, 90.0),
+        projection::perspective_gl(45.0_f32, (WINDOW_WIDTH as f32) / (WINDOW_HEIGHT as f32), 0.1, 100.0)
+        );
 
-
-    // const TEXTURE1_FILE_PATH: &str = r#"src/wall.png"#;
-    // let mut textures: Vec<Texture> = vec![];
-    // const UNIFORM_SHADER_FOLDER: &str = "uniform_shader";
     let mut shaders: Vec<ShaderProgram> = vec![];
-    const SHADER_FOLDER_PATH: &str = "src/shaders";
-    const BLINN_PHONG_SHADER_FOLDER: &str = "blinn_phong_shader";
-    const PARAM_BLINN_PHONG_SHADER_FOLDER: &str = "param_blinn_phong_shader";
     
-    // const TEXTURE_SHADER_FOLDER: &str = "texture_shader";
-    // textures.push(Texture::from_file(GL_TEXTURE0, TEXTURE1_FILE_PATH, false));
-    // shaders.push(texture_program(SHADER_FOLDER_PATH, TEXTURE_SHADER_FOLDER, &(textures[0]), &translation, &rotation, &model, &view, &projection));
-
     let models_to_load = vec!["src/cone.obj", "src/cube.obj"];
-    let mut loaded_models = vec![];
+    let mut meshes: Vec<MeshData> = vec![];
 
     for model_to_load in models_to_load {
         let (models, _materials) = tobj::load_obj(model_to_load, &tobj::GPU_LOAD_OPTIONS).unwrap();
         let mats = _materials.unwrap();
 
         let new_shader_idx = shaders.len();
-        println!("{:?}", new_shader_idx);
         shaders.push(param_color_program(
             SHADER_FOLDER_PATH, 
             PARAM_BLINN_PHONG_SHADER_FOLDER, 
@@ -100,26 +93,20 @@ fn main() {
             &vec::Vec3::from(mats[0].ambient),
             &vec::Vec3::from(mats[0].diffuse),
            &vec::Vec3::from(mats[0].specular),
-           mats[0].dissolve,
-            &mat::Mat4::identity(), 
-            &mat::Mat4::identity(),
-            &mat::Mat4::identity(),
-            &view,
-            &projection
+            mats[0].dissolve,
+            &default_model,
+            &camera.view_matrix(),
+            &camera.projection
         ));
 
-        loaded_models.push((
+        let tris = models[0].mesh.indices.len();
+
+        meshes.push(MeshData(
             combine_loaded_data( &models[0]), 
             models[0].mesh.indices.clone(), 
+            tris,
             new_shader_idx
         ));
-    }
-
-    let mut meshes: Vec<MeshData> = vec![];
-
-    for model in loaded_models {
-        let tris = model.1.len();
-        meshes.push(MeshData(model.0, model.1, tris, model.2));
     }
 
     let mut drawable_objs: Vec<Drawable> = vec![];
@@ -141,7 +128,7 @@ fn main() {
                 // buffer_data(BufferType::Array, bytemuck::cast_slice(&vertices), GL_STATIC_DRAW);
                 buffer_data(BufferType::Array, bytemuck::cast_slice(mesh.0.as_slice()), GL_STATIC_DRAW);
                 vbo
-            };
+                };
 
             /* generate buffer to hold groups of vertexes that form triangles
             set as the active element array buffer type
@@ -151,7 +138,7 @@ fn main() {
                 ebo.bind(BufferType::ElementArray);
                 buffer_data(BufferType::ElementArray, bytemuck::cast_slice(mesh.1.as_slice()), GL_STATIC_DRAW);
                 ebo
-            };
+                };
 
             unsafe {
                 glVertexAttribPointer(
@@ -179,45 +166,63 @@ fn main() {
         drawable_objs.push(Drawable(vao, vbo, ebo, mesh.2, mesh.3));
     }
 
-    
-    
     /* a complete graphics pipeline combines a vertex and fragment shader
     create a new shader program object */
 
-    let my_shader_idx = shaders.len();
-    shaders.push(color_program(SHADER_FOLDER_PATH, BLINN_PHONG_SHADER_FOLDER, &vec::Vec3::new(1.0, 1.0, 0.0), &world_translation, &world_rotation, &model, &view, &projection));
+    let _my_shader_idx = shaders.len();
+    shaders.push(color_program(
+        SHADER_FOLDER_PATH, 
+        BLINN_PHONG_SHADER_FOLDER, 
+        &vec::Vec3::new(0.0, 1.0, 0.0), 
+        &default_model, 
+        &camera.view_matrix(),
+        &camera.projection
+        ));
 
-    println!("Shaders: {:?}", shaders.len());
+    let mut objs_to_draw: Vec<GameObject> = vec![];
 
-    println!("{:?}", drawable_objs[0].4);
+    // for _ in 0..10000 {
+    //     objs_to_draw.push(make_go(vec::Vec3::new( rng.gen_range(0_f32, 10_f32), rng.gen_range(0_f32, 10_f32), -30.0), 0, drawable_objs[0].4));
+    // }
+    
+    for x in -10..10 {
+        for y in -10..10 {
+            let x_off = if ((x % 2) == 0) != ((y % 2) == 0) {1} else {0};
+            // let y = if y % 2 == 0 {y + 1} else {y};
+            objs_to_draw.push(make_go(vec::Vec3::new( ((2*x)) as f32, -2.0 - x_off as f32, (2*y) as f32), 1, drawable_objs[1].4));
+        }
+    }
 
-    let objs_to_draw: Vec<DrawableObject> = vec![
-        DrawableObject(vec::Vec3::new( 0.0, 0.0, -10.0), 0, drawable_objs[0].4),
-        DrawableObject(vec::Vec3::new( 2.0, 0.0, -10.0), 0, my_shader_idx),
-        DrawableObject(vec::Vec3::new( -2.0, 0.0, -10.0), 1, drawable_objs[1].4),
-        DrawableObject(vec::Vec3::new( 4.0, 0.0, -10.0), 1, my_shader_idx),
-    ];
+    objs_to_draw.push(make_go(vec::Vec3::new( 20 as f32, 0.0, 20 as f32), 1, drawable_objs[1].4));
+
+    
+    objs_to_draw[0].behaviors.push(Box::new(WASDish(2)));
+
+
+    /* mouse input config */
+    const MOUSE_SENSITIVITY: f32 = 0.4;
+    sdl.set_relative_mouse_mode(true).unwrap();
 
     /* Keyboard input storage */
     let mut keys_held = HashSet::new();
-    let mut input_translation = mat::Mat4::from_translation(vec::Vec3::zero());
 
     /* Time and FPS configuration */
     let mut deltatime = Duration::new(0, 0);
     let target_fps: f32 = 60.0;
     let target_frame_micros = (1000000_f32 / target_fps).ceil() as u64;
     let target_frame_time = Duration::from_micros(target_frame_micros);
-    let _start_instant = Instant::now();
-    let mut update_view_lights_worldtrans = true;
-    let mut focus_idx = 0;
+    let start_instant = Instant::now();
+    let mut update_view_lights = true;
 
     clear_color(0.0, 0.0, 0.0, 1.0);
 
-    let (mut rx, mut ry) = (0_f32, 0_f32);
+    let (mut rx, mut ry, mut rz) = (0_f32, 0_f32, 0_f32);
 
     'main_loop: loop {
         let frame_start = Instant::now();
         let deltasecs = deltatime.as_secs_f32();
+        let game_time = start_instant.elapsed().as_secs_f32();
+        let mut mouse_delta = (0.0, 0.0);
 
         unsafe { glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); }
 
@@ -235,6 +240,9 @@ fn main() {
                         keys_held.remove(&keycode);
                     }
                 },
+                Event::MouseMotion(MouseMotionEvent { x_delta, y_delta, .. }) => {
+                    mouse_delta = (x_delta as f32 * MOUSE_SENSITIVITY, y_delta as f32 * MOUSE_SENSITIVITY);
+                },
                 _ => (),
             }
         }
@@ -245,62 +253,46 @@ fn main() {
         if keys_held.contains(&Keycode::DOWN) { rx -= 1.0 * deltasecs; } 
         if keys_held.contains(&Keycode::RIGHT) { ry += 1.0 * deltasecs; }
         if keys_held.contains(&Keycode::LEFT) { ry -= 1.0 * deltasecs; }
+        if keys_held.contains(&Keycode::PAGEUP) { rz += 1.0 * deltasecs; }
+        if keys_held.contains(&Keycode::PAGEDOWN) { rz -= 1.0 * deltasecs; }
 
-        let model_rotation = mat::Mat4::from_euler_angles(rx, ry, 0.0);
-
-        let mut direction = vec::Vec3::zero();
-
-        if keys_held.contains(&Keycode::W) { direction.y += 1.0; update_view_lights_worldtrans = true;} 
-        if keys_held.contains(&Keycode::S) { direction.y += -1.0; update_view_lights_worldtrans = true;} 
-        if keys_held.contains(&Keycode::D) { direction.x += 1.0; update_view_lights_worldtrans = true;} 
-        if keys_held.contains(&Keycode::A) { direction.x += -1.0; update_view_lights_worldtrans = true;}
-        if keys_held.contains(&Keycode::INSERT) { direction.z += -1.0; update_view_lights_worldtrans = true;}
-        if keys_held.contains(&Keycode::DELETE) { direction.z += 1.0; update_view_lights_worldtrans = true;}
-
-        if direction != vec::Vec3::zero() { 
-            direction.normalize(); 
-        }
-
-        direction *= 2.0 * deltasecs;
-
-        input_translation.translate(&direction);
-
-        if keys_held.contains(&Keycode::_1) { focus_idx = 0; update_view_lights_worldtrans = true;} 
-        if keys_held.contains(&Keycode::_2) { focus_idx = 1; update_view_lights_worldtrans = true;} 
-        if keys_held.contains(&Keycode::_3) { focus_idx = 2; update_view_lights_worldtrans = true;} 
-        if keys_held.contains(&Keycode::_4) { focus_idx = 3; update_view_lights_worldtrans = true;} 
-
-        view_position += direction;
-        view = mat::Mat4::look_at(view_position, objs_to_draw[focus_idx].0, vec::Vec3::new(0.0,1.0,0.0));
-
+        let should_update_view = camera_controller(&keys_held, mouse_delta, &mut camera, 5.0 * deltasecs);
+        update_view_lights = update_view_lights || should_update_view;
+        
         /* draw vao verts */
 
-        if update_view_lights_worldtrans {
-            let [v1, v2, v3] = *(view_position.as_array());
+        if update_view_lights {
+            let [v1, v2, v3] = *(camera.view_pos.as_array());
             let [v4, v5, v6] = *(light_position.as_array());
             for shader in &shaders {
-                (*shader).set_4_float_matrix(UNI_ID[UniEnum::Translation as usize], world_translation.as_ptr().cast());
                 (*shader).set_3_float(UNI_ID[UniEnum::ViewPos as usize], v1, v2, v3);
                 (*shader).set_3_float(UNI_ID[UniEnum::LightPos as usize], v4, v5, v6);
-                (*shader).set_4_float_matrix(UNI_ID[UniEnum::View as usize], view.as_ptr().cast());
+                (*shader).set_4_float_matrix(UNI_ID[UniEnum::View as usize], camera.view_matrix().as_ptr().cast());
             }
-            update_view_lights_worldtrans = false;
+            update_view_lights = false;
         }
 
-        for obj in &objs_to_draw {
-            let (model_translation, model_type, shader_index) = ((*obj).0, (*obj).1, (*obj).2);
-            let shader = &shaders[shader_index];
-            let mut temp_model = mat::Mat4::identity();
-            temp_model = mat::Mat4::from_translation(model_translation) * model_rotation * temp_model;
+        for obj in &mut objs_to_draw {
+            
+            obj.do_actions(&keys_held, deltasecs, game_time);
 
-            (*shader).use_program();
-            (*shader).set_4_float_matrix(UNI_ID[UniEnum::Model as usize], temp_model.as_ptr().cast());
-            (*shader).set_4_float_matrix(UNI_ID[UniEnum::Rotation as usize], model_rotation.as_ptr().cast());
-            let vao = &drawable_objs[model_type].0;
-            (*vao).bind();
-            unsafe { glDrawElements(GL_TRIANGLES, drawable_objs[model_type].3 as i32, GL_UNSIGNED_INT, 0 as *const _); }
+            if let Some( draw ) = &mut obj.drawable_object {
+
+                (*draw).rotation.x = rx;
+                (*draw).rotation.y = ry;
+                (*draw).rotation.z = rz;
+
+                let shader = &shaders[(*draw).shader_idx];
+                
+                (*shader).use_program();
+                (*shader).set_4_float_matrix(UNI_ID[UniEnum::Model as usize], (*draw).model_matrix().as_ptr().cast());
+                (*shader).set_4_float_matrix(UNI_ID[UniEnum::Rotation as usize], (*draw).rotation_matrix().as_ptr().cast());
+                (*shader).set_3_float(UNI_ID[UniEnum::DiffuseColor as usize], (*draw).position.x / 10.0 + 1.0, (*draw).position.y + 3.0, (*draw).position.z / 10.0 + 1.0);
+                let mesh = &drawable_objs[(*draw).mesh_idx];
+                (*mesh).0.bind();
+                unsafe { glDrawElements(GL_TRIANGLES, (*mesh).3 as i32, GL_UNSIGNED_INT, 0 as *const _); }
+            }
         }
-
 
         /* 2 buffers exist, draw buffer and display buffer
         draw buffer is where the next frame is being built piece by piece

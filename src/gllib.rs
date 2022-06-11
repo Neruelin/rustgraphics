@@ -1,15 +1,43 @@
 #![allow(dead_code)]
 
 use ogl33::*;
+use beryllium::*;
 use std::fs;
+use std::collections::HashSet;
 use image::io::Reader as ImageReader;
-use ultraviolet::{mat, vec};
+use ultraviolet::{mat, vec, projection};
 use tobj::Model;
 
 // function to wrap clear color and allow it to be labelled safe because nothing should be able to go wrong with glclearcolor
 pub fn clear_color(r:f32, g:f32, b:f32, a:f32) {
     unsafe { glClearColor(r,g,b,a) }
 }
+
+pub struct CameraParams {
+    pub view_pos: vec::Vec3,
+    pub view_rot: vec::Vec3,
+    pub projection: mat::Mat4
+}
+impl CameraParams {
+    pub fn new(view_pos: vec::Vec3, view_rot: vec::Vec3, projection: mat::Mat4) -> Self {
+        Self {view_pos, view_rot, projection}
+    }
+    pub fn look_dir(&self) -> vec::Vec3 {
+        let [roll, pitch, yaw] = *self.view_rot.as_array();
+        let x = f32::cos(yaw.to_radians()) * f32::cos(pitch.to_radians());
+        let y = f32::sin(pitch.to_radians());
+        let z = f32::sin(yaw.to_radians()) * f32::cos(pitch.to_radians());
+        let mut dir = vec::Vec3::new(x, y, z);
+        dir.normalized()
+    }
+    pub fn view_matrix(&self) -> mat::Mat4 {
+        let look_dir = self.look_dir();
+        let rot = mat::Mat4::look_at(self.view_pos, self.view_pos + look_dir, vec::Vec3::new(0.0,1.0,0.0));
+        
+        rot
+    }
+}
+
 // verts + norms, tri indices, # of tris, shaderidx
 pub struct MeshData(pub Vec<f32>, pub Vec<u32>, pub usize, pub usize);
 // vao, vbo, ebo, tris, shaderidx
@@ -19,7 +47,83 @@ pub struct Drawable(pub VertexArray, pub Buffer, pub Buffer, pub usize, pub usiz
 
 //     }
 // }
-pub struct DrawableObject(pub vec::Vec3, pub usize, pub usize);
+pub struct DrawableObject {
+    pub position: vec::Vec3, 
+    pub rotation: vec::Vec3,
+    pub mesh_idx: usize, 
+    pub shader_idx: usize
+}
+impl DrawableObject {
+    pub fn new(position: vec::Vec3, rotation: vec::Vec3, mesh_idx: usize, shader_idx: usize) -> Self {
+        Self {position, rotation, mesh_idx, shader_idx}
+    }
+    pub fn model_matrix(&self) -> mat::Mat4 {
+        let pos = mat::Mat4::from_translation(self.position);
+        let [roll, pitch, yaw] = *self.rotation.as_array();
+        let rot = mat::Mat4::from_euler_angles(roll, pitch, yaw);
+        pos * rot
+    }
+    pub fn rotation_matrix(&self) -> mat::Mat4 {
+        let [roll, pitch, yaw] = *self.rotation.as_array();
+        mat::Mat4::from_euler_angles(roll, pitch, yaw)
+    }
+}
+
+pub trait Behavior {
+    fn action(&self, draw_obj: &mut Option<DrawableObject>, keys_held: &HashSet<Keycode>, deltasecs: f32, game_time: f32);
+}
+pub struct B1(pub usize);
+impl Behavior for B1 {
+    fn action(&self, draw_obj: &mut Option<DrawableObject>, keys_held: &HashSet<Keycode>, deltasecs: f32, game_time: f32) {
+        if let Some(draw_obj) = draw_obj {
+            (*draw_obj).position.y += f32::cos(((*draw_obj).position.x * 0.25) + ((*draw_obj).position.z * 0.25) + (game_time * 2.0)) * deltasecs * 1.5;
+        }
+    }
+}
+pub struct WASDish(pub usize);
+impl Behavior for WASDish {
+    fn action(&self, draw_obj: &mut Option<DrawableObject>, keys_held: &HashSet<Keycode>, deltasecs: f32, game_time: f32) {
+        let (mut rx, mut ry, mut rz) = (0.0_f32, 0.0_f32, 0.0_f32);
+        if keys_held.contains(&Keycode::I) { ry += 1.0; } 
+        if keys_held.contains(&Keycode::K) { ry -= 1.0; } 
+        if keys_held.contains(&Keycode::L) { rx += 1.0; }
+        if keys_held.contains(&Keycode::J) { rx -= 1.0; }
+        if let Some(draw_obj) = draw_obj {
+            (*draw_obj).position.x += rx * deltasecs;
+            (*draw_obj).position.y += ry * deltasecs;
+            (*draw_obj).position.z += rz * deltasecs;
+        }
+    }
+}
+
+pub struct GameObject {
+    pub children: Vec<Self>,
+    pub drawable_object: Option<DrawableObject>,
+    pub behaviors: Vec<Box<dyn Behavior>>
+}
+impl GameObject {
+    pub fn new(children: Vec<Self>, drawable_object: Option<DrawableObject>, behaviors: Vec<Box<dyn Behavior>>) -> Self {
+        Self{children, drawable_object, behaviors}
+    }
+    pub fn empty() -> Self {
+        Self{children: vec![], drawable_object: None, behaviors: vec![]}
+    }
+    pub fn do_actions(&mut self, keys_held: &HashSet<Keycode>, deltasecs: f32, game_time: f32) {
+        for val in self.behaviors.iter() {
+            val.action( &mut self.drawable_object, keys_held, deltasecs, game_time);
+        }
+    }
+}
+
+pub fn make_go(position: vec::Vec3, drawable_idx: usize, shader_idx: usize) -> GameObject {
+    let mut go = GameObject::empty();
+    go.children = vec![];
+    go.drawable_object =Some(DrawableObject::new(position, vec::Vec3::zero(), drawable_idx, shader_idx));
+    go.behaviors = vec![Box::new(B1(1))];
+    go
+}
+
+
 
 // struct to wrap creation of Vertex Array Objects with functions to bind it as the active VAO or unbind it
 pub struct VertexArray(pub GLuint);
@@ -97,8 +201,7 @@ pub enum ShaderType {
     Fragment = GL_FRAGMENT_SHADER as isize,
 }
 
-pub const UNI_ID: [&str; 15] = [
-    "translation\0",
+pub const UNI_ID: [&str; 14] = [
     "rotation\0",
     "model\0",
     "view\0",
@@ -115,7 +218,6 @@ pub const UNI_ID: [&str; 15] = [
     "our_texture2\0"
 ];
 pub enum UniEnum {
-    Translation,
     Rotation,
     Model,
     View, 
@@ -456,18 +558,15 @@ pub fn color_program<'a>(
     base_folder: &'a str,
     shader_folder: &'a str,
     color: &vec::Vec3,
-    translation: &mat::Mat4, 
-    rotation: &mat::Mat4, 
     model: &mat::Mat4, 
     view: &mat::Mat4, 
     projection: &mat::Mat4
 ) -> ShaderProgram {
-    let vert = format!("{}/{}/{}", base_folder, shader_folder, "vertex");
-    let frag = format!("{}/{}/{}", base_folder, shader_folder, "fragment");
+    let vert = format!("{}/{}/{}", base_folder, shader_folder, "vertex.GLSL");
+    let frag = format!("{}/{}/{}", base_folder, shader_folder, "fragment.GLSL");
     let shader = ShaderProgram::from_files(&vert, &frag).unwrap();
     let [v1, v2, v3] = *((*color).as_array());
-    shader.set_4_float_matrix(UNI_ID[UniEnum::Translation as usize], translation.as_ptr().cast());
-    shader.set_4_float_matrix(UNI_ID[UniEnum::Rotation as usize], rotation.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Rotation as usize], mat::Mat4::identity().as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::Model as usize], model.as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::View as usize], view.as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::Projection as usize], projection.as_ptr().cast());
@@ -485,14 +584,12 @@ pub fn param_color_program<'a>(
     diffuse_color: &vec::Vec3,
     specular_color: &vec::Vec3,
     dissolve: f32,
-    translation: &mat::Mat4, 
-    rotation: &mat::Mat4, 
     model: &mat::Mat4, 
     view: &mat::Mat4, 
     projection: &mat::Mat4
 ) -> ShaderProgram {
-    let vert = format!("{}/{}/{}", base_folder, shader_folder, "vertex");
-    let frag = format!("{}/{}/{}", base_folder, shader_folder, "fragment");
+    let vert = format!("{}/{}/{}", base_folder, shader_folder, "vertex.GLSL");
+    let frag = format!("{}/{}/{}", base_folder, shader_folder, "fragment.GLSL");
     let shader = ShaderProgram::from_files(&vert, &frag).unwrap();
     let [v1, v2, v3] = *((*ambient_color).as_array());
     let [v4, v5, v6] = *((*diffuse_color).as_array());
@@ -505,8 +602,7 @@ pub fn param_color_program<'a>(
     shader.set_3_float(UNI_ID[UniEnum::SpecularColor as usize], v7, v8, v9);
     shader.set_1_float(UNI_ID[UniEnum::OpticalDensity as usize], optical_density);
     shader.set_1_float(UNI_ID[UniEnum::Dissolve as usize], dissolve);
-    shader.set_4_float_matrix(UNI_ID[UniEnum::Translation as usize], translation.as_ptr().cast());
-    shader.set_4_float_matrix(UNI_ID[UniEnum::Rotation as usize], rotation.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Rotation as usize], mat::Mat4::identity().as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::Model as usize], model.as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::View as usize], view.as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::Projection as usize], projection.as_ptr().cast());
@@ -519,22 +615,19 @@ pub fn texture_program<'a>(
     base_folder: &'a str, 
     shader_folder: &'a str,
     texture: &'a Texture,
-    translation: &mat::Mat4, 
-    rotation: &mat::Mat4, 
     model: &mat::Mat4, 
     view: &mat::Mat4, 
     projection: &mat::Mat4
 ) -> ShaderProgram {
-    let vert = format!("{}/{}/{}", base_folder, shader_folder, "vertex");
-    let frag = format!("{}/{}/{}", base_folder, shader_folder, "fragment");
+    let vert = format!("{}/{}/{}", base_folder, shader_folder, "vertex.GLSL");
+    let frag = format!("{}/{}/{}", base_folder, shader_folder, "fragment.GLSL");
     let shader = ShaderProgram::from_files_with_texture(
         &vert, 
         &frag,
         &texture,
         UNI_ID[UniEnum::Texture as usize]
     ).unwrap();
-    shader.set_4_float_matrix(UNI_ID[UniEnum::Translation as usize], translation.as_ptr().cast());
-    shader.set_4_float_matrix(UNI_ID[UniEnum::Rotation as usize], rotation.as_ptr().cast());
+    shader.set_4_float_matrix(UNI_ID[UniEnum::Rotation as usize], mat::Mat4::identity().as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::Model as usize], model.as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::View as usize], view.as_ptr().cast());
     shader.set_4_float_matrix(UNI_ID[UniEnum::Projection as usize], projection.as_ptr().cast());
