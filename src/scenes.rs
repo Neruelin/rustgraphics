@@ -101,7 +101,6 @@ pub fn make_scene_physics(
         ball_body_handle2, 
         &mut ctx.rigid_body_set
     );
-    // let testing = BehaviorDataContainerEnum:: ;
     let id2 = ctx.game_obj_store.add(make_go_rb::<BehaviorDataContainerEnum>(
         vec::Vec3::zero(), 
         vec::Vec3::zero(),
@@ -153,6 +152,13 @@ pub fn make_scene_physics(
             vec::Vec3::one(),
             model_map["cube"],
             cube_body_handle
+            ).add_behavior(Behaviors::BAttractionTo)
+            .add_behavior_data(
+                Behaviors::BAttractionTo, 
+                BehaviorDataContainerEnum::AttractionToData(AttractionToData{
+                    target: id2,
+                    force: 0.25
+                })
             )
         );
         ctx.floor_set.insert(cube_body_handle);

@@ -1,5 +1,4 @@
 #![allow(unused_variables, dead_code)]
-use log::{info, warn};
 use crate::gllib::*;
 use rapier2d::prelude::*;
 use beryllium::*;
@@ -12,6 +11,7 @@ pub enum Behaviors {
     BDebuggin,
     BCameraTracking,
     BSpawnBall,
+    BAttractionTo,
 }
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
@@ -52,6 +52,11 @@ pub fn apply_behaviors(
                 let (mut to_remove, mut to_add) = spawn_ball(loop_ctx);
                 objs_to_remove.append(&mut to_remove);
                 objs_to_add.append(&mut to_add);
+            },
+            Behaviors::BAttractionTo => {
+                let (mut to_remove, mut to_add) = attraction_to(loop_ctx);
+                objs_to_remove.append(&mut to_remove);
+                objs_to_add.append(&mut to_add);
             }
         }
     }
@@ -67,7 +72,7 @@ pub fn arrow_control(
             let mut moved = false;  
             if loop_ctx.keys_held.contains(&Keycode::RIGHT) { impulse.x += arrow_control_data.accel ; moved = true;}
             if loop_ctx.keys_held.contains(&Keycode::LEFT) { impulse.x -= arrow_control_data.accel ; moved = true;}
-            if loop_ctx.go.grounded && loop_ctx.keys_held.contains(&Keycode::SPACE) { impulse.y = arrow_control_data.accel; loop_ctx.go.grounded = false;}
+            if loop_ctx.go.grounded && loop_ctx.keys_held.contains(&Keycode::SPACE) { impulse.y = arrow_control_data.accel * 2.0; loop_ctx.go.grounded = false;}
             loop_ctx.rigid_body_set[rb_handle].apply_impulse(impulse, true);
             let mut linvel = loop_ctx.rigid_body_set[rb_handle].linvel().clone();
             if loop_ctx.go.grounded && !moved {
@@ -148,6 +153,13 @@ pub fn spawn_ball (
                     vec::Vec3::one(),
                     loop_ctx.model_map["ball"],
                     ball_body_handler
+                    ).add_behavior(Behaviors::BAttractionTo)
+                    .add_behavior_data(
+                        Behaviors::BAttractionTo, 
+                        BehaviorDataContainerEnum::AttractionToData(AttractionToData{
+                            target: loop_ctx.go.id,
+                            force: 1.0
+                        })
                     );
                 objs_to_add.push(new_ball_obj);
                 spawn_ball_data.last_use = Instant::now();
@@ -157,19 +169,44 @@ pub fn spawn_ball (
     
     (vec![], objs_to_add)
 }
-#[derive(Debug)]
 
+#[derive(Debug)]
 pub struct SpawnBallData{
     pub last_use: Instant,
     pub cooldown_length: Duration,
 }
 impl BehaviorDataContainer for SpawnBallData{}
 
+pub fn attraction_to (
+    loop_ctx: &mut LoopContext<BehaviorDataContainerEnum>
+) -> (Vec<GameObjectID>, Vec<GameObject<BehaviorDataContainerEnum>>) {
+    if let Some(BehaviorDataContainerEnum::AttractionToData(attraction_to_data)) = loop_ctx.go.behaviors_data.get_mut(&BehaviorData::Behaviors(Behaviors::BAttractionTo)) {
+        if let Some(rb_handle) = loop_ctx.go.rigid_body_handle {
+            if let Some(tar_rb_handle) = loop_ctx.game_obj_store.0.get(&attraction_to_data.target).unwrap().borrow().rigid_body_handle {
+                let a = loop_ctx.rigid_body_set[rb_handle].translation().clone();
+                let b = loop_ctx.rigid_body_set[tar_rb_handle].translation().clone();
+                let c = (b - a).normalize() * attraction_to_data.force;
+                loop_ctx.rigid_body_set[rb_handle].apply_impulse(c, true);
+            }
+        }
+    }
+    
+    (vec![], vec![])
+}
+
+#[derive(Debug)]
+pub struct AttractionToData{
+    pub target: GameObjectID,
+    pub force: f32
+}
+impl BehaviorDataContainer for AttractionToData{}
+
 #[derive(Debug)]
 pub enum BehaviorDataContainerEnum {
     ArrowControlData(ArrowControlData),
     CameraTrackingData(CameraTrackingData),
     SpawnBallData(SpawnBallData),
+    AttractionToData(AttractionToData),
 }
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use log::{Record, Level, Metadata, SetLoggerError, LevelFilter, info, warn};
+use log::{Level, SetLoggerError, LevelFilter, info};
 use ogl33::*;
 use beryllium::*;
 // use rapier2d::prelude::*;
@@ -40,6 +40,7 @@ impl log::Log for SimpleLogger {
         if self.enabled(record.metadata()) {
             match record.target() {
                 LT_MAIN_LOOP => {},
+                LT_BEHAVIORS => {},
                 _ => {return;}
             }
             println!("[{}:{}]: {}", record.level(), record.target(), record.args());
@@ -245,7 +246,7 @@ impl<T> GameObjectStore<T> {
             // some error i guess
         }
     }
-    pub fn lookup(&self, rb_handle: &RigidBodyHandle) -> GameObjectID {
+    pub fn lookup_by_rb_handle(&self, rb_handle: &RigidBodyHandle) -> GameObjectID {
         *self.1.get(rb_handle).expect("rb_handle not in rb to obj map")
     }
 }
@@ -856,7 +857,8 @@ pub struct LoopContext<'a, T> {
     pub rigid_body_set: &'a mut RigidBodySet, 
     pub collider_set: &'a mut ColliderSet,
     pub floor_set: &'a mut HashSet<RigidBodyHandle>,
-    pub model_map: &'a HashMap<&'a str, usize>
+    pub model_map: &'a HashMap<&'a str, usize>,
+    pub game_obj_store: &'a GameObjectStore<T>
 }
 
 pub struct Context<T> {
@@ -912,7 +914,7 @@ impl<T> Context<T> {
                 };
                 
                 /* set vsync on to block program until rendered screen has been shown */
-                ctx.window.set_swap_interval(SwapInterval::Vsync);
+                // ctx.window.set_swap_interval(SwapInterval::Vsync);
                 ctx.init_ogl();
                 
                 Ok(ctx)
@@ -1073,7 +1075,7 @@ pub fn main_loop<T> (ctx: &mut Context<T>, model_map: &HashMap<&str, usize>) {
     let mut deltatime = Duration::new(0, 0);
     let target_fps: f32 = 60.0;
     let target_frame_micros = (1000000_f32 / target_fps).ceil() as u64;
-    let target_frame_time = Duration::from_micros(target_frame_micros);
+    let _target_frame_time = Duration::from_micros(target_frame_micros);
     let start_instant = Instant::now();
     let mut update_view_lights = true;
 
@@ -1176,7 +1178,8 @@ pub fn main_loop<T> (ctx: &mut Context<T>, model_map: &HashMap<&str, usize>) {
                 rigid_body_set: &mut ctx.rigid_body_set, 
                 collider_set: &mut ctx.collider_set, 
                 floor_set: &mut ctx.floor_set,
-                model_map
+                model_map,
+                game_obj_store: &ctx.game_obj_store
             };
             loop_ctx.go.physic_update(loop_ctx.rigid_body_set);
 
