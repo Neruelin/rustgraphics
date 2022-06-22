@@ -19,7 +19,7 @@ uniform float dissolve;
 void main()
 {           
     // ambient
-    vec3 ambient = 0.1 * ambient_color;
+    vec3 ambient = 0.05 * ambient_color;
     // diffuse
     vec3 lightDir = normalize(lightPos - fs_in.FragPos);
     vec3 normal = normalize(fs_in.Normal);

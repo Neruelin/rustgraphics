@@ -1,5 +1,6 @@
-use ultraviolet::{mat, vec};
-use ogl33::*;
+#![allow(unused_variables, dead_code)]
+
+use ultraviolet::vec;
 use beryllium::*;
 use std::collections::HashSet;
 
@@ -11,7 +12,6 @@ pub fn camera_controller<'a>(
     camera: &'a mut CameraParams,
     speed: f32
 ) -> bool {
-    // let front = vec::Vec3::new(f32::cos((*camera).view_rot.x));
     let mut direction = vec::Vec3::zero();
     let mut update_view = false;
     let mut speed_mult = 1;
@@ -22,8 +22,6 @@ pub fn camera_controller<'a>(
     if (*keys_held).contains(&Keycode::S) { direction -= look_dir; update_view = true;} 
     if (*keys_held).contains(&Keycode::D) { direction += look_dir_left; update_view = true;} 
     if (*keys_held).contains(&Keycode::A) { direction -= look_dir_left; update_view = true;}
-    // if (*keys_held).contains(&Keycode::INSERT) { direction.z += -1.0; update_view = true;}
-    // if (*keys_held).contains(&Keycode::DELETE) { direction.z += 1.0; update_view = true;}
 
     if direction != vec::Vec3::zero() { 
         direction.normalize(); 

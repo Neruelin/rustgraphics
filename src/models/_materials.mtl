@@ -1,0 +1,42 @@
+# Blender MTL File: 'untitled.blend'
+# Material Count: 3
+
+newmtl Brown
+Ns 500
+Ka 0.7 0.3 0.3
+Kd 0.7 0.3 0.3
+Ks 0.8 0.8 0.8
+d 1
+illum 2
+
+newmtl Green
+Ns 500
+Ka 0.3 0.8 0.3
+Kd 0.3 0.8 0.3
+Ks 0.8 0.8 0.8
+d 1
+illum 2
+
+newmtl Blue
+Ns 500
+Ka 0.3 0.3 0.8
+Kd 0.3 0.3 0.8
+Ks 0.8 0.8 0.8
+d 1
+illum 2
+
+newmtl LightBlue
+Ns 500
+Ka 0.5 0.5 0.8
+Kd 0.5 0.5 0.8
+Ks 0.8 0.8 0.8
+d 1
+illum 2
+
+newmtl Default
+Ns 500
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.8 0.8 0.8
+d 1
+illum 2

@@ -13,3 +13,5 @@ beryllium = "0.2.0-alpha.4"
 image = "0.24.2"
 rand = "0.5.5"
 tobj = "3.2.2"
+rapier2d = { version = "*", features = [ "simd-stable" ] }
+log = {version = "0.4.17", features = [ "kv_unstable" ] } 
